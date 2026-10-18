@@ -1,0 +1,43 @@
+# =====================================================================
+# Secretos del kit de despliegue Mailu - Hefesto Studio
+# ESTE ARCHIVO NO SE SUBE NUNCA A GIT.
+# =====================================================================
+
+# Variables reales del servidor. Contiene SECRET_KEY y contrasenas.
+.env
+.env.*
+!.env.example
+
+# Respaldos. El correo del cliente no se versiona jamas, por ningun motivo.
+respaldos/
+backup/
+*.tar
+*.tar.gz
+manifiesto.txt
+SHA256SUMS
+.completo
+
+# Certificados TLS y material criptografico.
+/certs/
+*.pem
+*.key
+*.crt
+
+# Datos de Mailu si alguien los dejo sueltos en el directorio de trabajo.
+mail/
+data/
+dkim/
+mailqueue/
+filter/
+webmail/
+
+# Registros.
+/logs/
+*.log
+
+# Editores y sistema operativo.
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp

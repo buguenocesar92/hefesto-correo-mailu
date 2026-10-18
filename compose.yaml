@@ -1,0 +1,269 @@
+# =====================================================================
+# Mailu 2024.06.64 - kit de despliegue Hefesto Studio
+# =====================================================================
+# Basado en la plantilla oficial del proyecto, verificada en el tag
+# 2024.06.64 del repositorio Mailu/Mailu:
+#   https://github.com/Mailu/Mailu/blob/2024.06.64/setup/flavors/compose/docker-compose.yml
+#
+# ESTADO DEL KIT: "kit preparado". Este compose NO ha sido ejecutado en
+# ningun servidor. Ver docs/07-PRUEBAS-DE-ACEPTACION.md
+#
+# ---------------------------------------------------------------------
+# LEE ESTO ANTES DE LEVANTAR NADA
+# ---------------------------------------------------------------------
+# 1. ESTE ARCHIVO PUBLICA EL PUERTO 25. Abrir el 25 es irreversible
+#    para la reputacion de una IP: si el dominio no tiene SPF, DKIM,
+#    DMARC, DNS inverso y PTR correctos, los servidores de correo
+#    receptores van a marcar tu IP como fuente de spam y las listas
+#    negras la van a mantener. La recuperacion puede tomar MESES.
+#
+# 2. EN UN ENTORNO DE PRUEBA NO PUBLICA EL 25. No es una
+#    recomendacion, es un requisito. Este compose permite remapear el
+#    puerto del host sin tocar el compose: define PUERTO_SMTP=2525 en
+#    el archivo .env y el puerto 25 real queda publicado en 2525.
+#    Ver docs/01-INSTALACION-DOCKER.md, seccion "Montaje de prueba".
+#
+# 3. EL PUERTO 25 DEBE ESTAR ABIERTO AL INTERNET para recibir correo.
+#    Si tu proveedor de VPS lo tiene bloqueado, consulta
+#    docs/08-SERVICIOS-COMERCIALES.md. No existe ninguna forma
+#    legitima de rodear ese bloqueo, y este kit no la intenta.
+# =====================================================================
+
+name: ${COMPOSE_PROJECT_NAME:-mailu}
+
+# Los puertos se publican con indireccion de host: ${PUERTO_X:-puerto}
+# para que puedas moverlos sin editar el compose. El puerto de destino
+# dentro del contenedor NO cambia: Docker lo publica igual.
+x-puertos-mailu: &puertos-mailu
+  # SMTP entrante, servidor a servidor. OBLIGATORIO para recibir correo.
+  # No se puede desactivar (variable PORTS en .env).
+  - "${BIND4:-0.0.0.0}:${PUERTO_SMTP:-25}:25"
+
+  # Submission con TLS implicito (SMTPS). Puerto que usan las apps de
+  # celular y el webmail. Si tu .env no lista 587 en PORTS, este es el
+  # puerto de envio que debe quedar funcionando.
+  - "${BIND4:-0.0.0.0}:${PUERTO_SUBMITS:-465}:465"
+
+  # Submission con STARTTLS. OJO: Mailu 2024.06 NO habilita el 587 por
+  # defecto (PORTS por defecto = 25,80,443,465,993,995,4190). El puerto
+  # se publica igual, pero nginx no escucha en el hasta que agregues
+  # 587 a la variable PORTS del .env.
+  - "${BIND4:-0.0.0.0}:${PUERTO_SUBMIT:-587}:587"
+
+  # IMAP sobre TLS. OBLIGATORIO (no se puede desactivar via PORTS).
+  - "${BIND4:-0.0.0.0}:${PUERTO_IMAPS:-993}:993"
+
+  # ManageSieve: reglas de filtrado del lado del servidor usadas por
+  # Roundcube. Opcional, pero sin el los filtros del webmail fallan.
+  - "${BIND4:-0.0.0.0}:${PUERTO_SIEVE:-4190}:4190"
+
+  # HTTP: necesario para la validacion ACME de Let's Encrypt y para
+  # redirigir a HTTPS. Sin 80 publicado, TLS_FLAVOR=letsencrypt falla.
+  - "${BIND4:-0.0.0.0}:${PUERTO_HTTP:-80}:80"
+
+  # HTTPS: panel de administracion (/admin) y webmail (/webmail).
+  - "${BIND4:-0.0.0.0}:${PUERTO_HTTPS:-443}:443"
+
+services:
+
+  # ------------------------------------------------------------------
+  # Servicio unico que atiende TODOS los puertos de correo e interfaz.
+  # Es nginx. Detras de el hay imap, smtp, admin y webmail.
+  # No publiques nunca el admin ni la base de datos por separado.
+  # ------------------------------------------------------------------
+  front:
+    image: ghcr.io/mailu/nginx:${MAILU_VERSION:-2024.06.64}
+    hostname: mailu-front
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - resolver
+      - imap
+      - smtp
+      - antispam
+      - admin
+      - webmail
+    # Resolutor DNSSEC propio. Mailu 1.9+ REQUIERE un resolutor que
+    # valide DNSSEC; el contenedor admin se queda esperando en el
+    # arranque si no encuentra uno (ver core/admin/start.py, test_DNS).
+    dns:
+      - ${RESOLVER_IP:-192.168.203.9}
+    networks:
+      default:
+      webmail:
+    volumes:
+      - certs:/certs
+      - ./config/overrides/nginx:/overrides:ro
+    ports: *puertos-mailu
+
+  # ------------------------------------------------------------------
+  # Resolutor DNS unbound. NO es opcional en la practica: sin el, el
+  # contenedor admin no termina de arrancar (ver arriba).
+  # ------------------------------------------------------------------
+  resolver:
+    image: ghcr.io/mailu/unbound:${MAILU_VERSION:-2024.06.64}
+    hostname: mailu-resolver
+    restart: unless-stopped
+    env_file:
+      - .env
+    networks:
+      default:
+        ipv4_address: ${RESOLVER_IP:-192.168.203.9}
+
+  # ------------------------------------------------------------------
+  # Panel de administracion (Flask). Base SQLite interna en /data/main.db.
+  # El navegador NUNCA se conecta a la base: todo va por la API interna.
+  # ------------------------------------------------------------------
+  admin:
+    image: ghcr.io/mailu/admin:${MAILU_VERSION:-2024.06.64}
+    hostname: mailu-admin
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - redis
+      - resolver
+    dns:
+      - ${RESOLVER_IP:-192.168.203.9}
+    networks:
+      - default
+    volumes:
+      # main.db (usuarios, dominios, aliases), roundcube.db, instance
+      - data:/data
+      # claves privadas DKIM. Si se pierden, hay que regenerar DKIM
+      # y republicar el registro DNS.
+      - dkim:/dkim
+
+  # ------------------------------------------------------------------
+  # IMAP/Dovecot. Aqui vive el correo: /mail/<dominio>/<usuario>/
+  # Este es el unico volumen que NO se puede regenerar. Si el cliente
+  # no tiene copia, no existe otra.
+  # ------------------------------------------------------------------
+  imap:
+    image: ghcr.io/mailu/dovecot:${MAILU_VERSION:-2024.06.64}
+    hostname: mailu-imap
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - front
+      - resolver
+    dns:
+      - ${RESOLVER_IP:-192.168.203.9}
+    networks:
+      - default
+    volumes:
+      - mail:/mail
+      - ./config/overrides/dovecot:/overrides:ro
+
+  # ------------------------------------------------------------------
+  # SMTP/Postfix. Cola de salida en /queue.
+  # ------------------------------------------------------------------
+  smtp:
+    image: ghcr.io/mailu/postfix:${MAILU_VERSION:-2024.06.64}
+    hostname: mailu-smtp
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - front
+      - resolver
+    dns:
+      - ${RESOLVER_IP:-192.168.203.9}
+    networks:
+      - default
+    volumes:
+      - mailqueue:/queue
+      - ./config/overrides/postfix:/overrides:ro
+
+  # ------------------------------------------------------------------
+  # Antispam Rspamd. Aprende del comportamiento de los usuarios, por
+  # eso su volumen es persistente aunque se pueda reconstruir.
+  # ------------------------------------------------------------------
+  antispam:
+    image: ghcr.io/mailu/rspamd:${MAILU_VERSION:-2024.06.64}
+    hostname: mailu-antispam
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - front
+      - redis
+      - resolver
+    dns:
+      - ${RESOLVER_IP:-192.168.203.9}
+    networks:
+      - default
+    volumes:
+      - filter:/var/lib/rspamd
+      - ./config/overrides/rspamd:/overrides:ro
+
+  # ------------------------------------------------------------------
+  # Webmail. Este compose usa Roundcube. SnappyMail requiere cambiar
+  # WEBMAIL en el .env (y el montaje de overrides se ajusta solo con
+  # esa variable). Para quitar el webmail del todo, ver
+  # docs/02-INSTALACION-COOLIFY.md, seccion "Sin webmail".
+  # ------------------------------------------------------------------
+  webmail:
+    image: ghcr.io/mailu/webmail:${MAILU_VERSION:-2024.06.64}
+    hostname: mailu-webmail
+    restart: unless-stopped
+    env_file:
+      - .env
+    depends_on:
+      - front
+    networks:
+      - webmail:
+    volumes:
+      - webmail:/data
+      - ./config/overrides/${WEBMAIL:-roundcube}:/overrides:ro
+
+  # ------------------------------------------------------------------
+  # Redis. Cache de sesiones y limitador de intentos de autenticacion.
+  # NO es la base de datos de Mailu y NO se respalda: ver
+  # docs/05-RESPALDOS-Y-RESTAURACION.md.
+  # ------------------------------------------------------------------
+  redis:
+    image: redis:7.2.16-alpine@sha256:29e8589c3f9ba699b5f7aa4b3c7733c58852a3626439e619aa0ee78de08c6ca0
+    hostname: mailu-redis
+    restart: unless-stopped
+    depends_on:
+      - resolver
+    dns:
+      - ${RESOLVER_IP:-192.168.203.9}
+    networks:
+      - default
+    volumes:
+      - redis:/data
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: ${SUBNET:-192.168.203.0/24}
+  # El webmail va en una red aparte: no necesita ver la red interna de
+  # correo, y asi queda aislado del resto.
+  webmail:
+    driver: bridge
+
+volumes:
+  # Certificados TLS que presenta el servidor en SMTP, IMAP y HTTPS.
+  certs:
+  # Base de datos interna del panel de administracion (SQLite) y de
+  # Roundcube. Contiene usuarios, dominios, alias y cuotas.
+  data:
+  # Claves privadas DKIM por dominio.
+  dkim:
+  # EL CORREO. Maildir de todos los buzones. Irreemplazable.
+  mail:
+  # Correo en cola todavia no entregado.
+  mailqueue:
+  # Base de datos de aprendizaje de Rspamd.
+  filter:
+  # Datos de Roundcube (preferencias, contactos, borradores).
+  webmail:
+  # Cache de Redis. Efimera, no se respalda.
+  redis:
