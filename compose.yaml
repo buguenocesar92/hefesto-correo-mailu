@@ -79,11 +79,7 @@ services:
       - .env
     depends_on:
       - resolver
-      - imap
-      - smtp
-      - antispam
       - admin
-      - webmail
     # Resolutor DNSSEC propio. Mailu 1.9+ REQUIERE un resolutor que
     # valide DNSSEC; el contenedor admin se queda esperando en el
     # arranque si no encuentra uno (ver core/admin/start.py, test_DNS).
@@ -214,7 +210,7 @@ services:
     depends_on:
       - front
     networks:
-      - webmail:
+      - webmail
     volumes:
       - webmail:/data
       - ./config/overrides/${WEBMAIL:-roundcube}:/overrides:ro
