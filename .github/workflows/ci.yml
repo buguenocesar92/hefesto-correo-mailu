@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, coolify, 'plan/**', 'feature/**', 'bugfix/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validacion:
+    name: Compose, sintaxis, pruebas y secretos
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Descargar el repositorio
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Instalar bats, shellcheck, age y gitleaks
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bats shellcheck age
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar xz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: El compose renderiza con el .env de ejemplo
+        # El compose declara `env_file: - .env`: se renderiza en un directorio
+        # temporal con una copia de .env.example como .env. Nunca se usa un
+        # .env real.
+        run: |
+          set -euo pipefail
+          TMP_PROYECTO="$(mktemp -d)"
+          cp compose.yaml "$TMP_PROYECTO/compose.yaml"
+          cp .env.example "$TMP_PROYECTO/.env"
+          docker compose --project-directory "$TMP_PROYECTO" \
+            -f "$TMP_PROYECTO/compose.yaml" --env-file "$TMP_PROYECTO/.env" config --quiet
+          rm -rf "$TMP_PROYECTO"
+
+      - name: Sintaxis de los scripts
+        run: |
+          find scripts -name '*.sh' -print0 | xargs -0 -r shellcheck -S warning -x
+          find scripts -name '*.sh' -print0 | xargs -0 -r -n1 bash -n
+
+      - name: Suite bats
+        run: bats tests/
+
+      - name: Buscar secretos en el historico
+        run: gitleaks detect --source . --no-banner --redact
+
+  trivy:
+    name: Analisis de vulnerabilidades y secretos
+    runs-on: ubuntu-24.04
+    needs: validacion
+    steps:
+      - uses: actions/checkout@v4
+      - name: Analizar el repositorio
+        uses: aquasecurity/trivy-action@v0.28.0
+        with:
+          scan-type: repo
+          scan-ref: .
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
