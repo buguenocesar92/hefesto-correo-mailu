@@ -1,0 +1,29 @@
+title = "hefesto-correo-mailu - gitleaks"
+
+[extend]
+useDefault = true
+
+# Plantillas de ejemplo: marcadores de posicion que el operador reemplaza.
+# gitleaks 8.18.x lee la lista como mapa [allowlist]; 8.19+ como array
+# [[allowlists]]. Se declaran las dos.
+[allowlist]
+description = "Plantillas de ejemplo y marcadores de posicion"
+paths = [
+  '''(?i)(^|/)\.env\.example$''',
+  '''(?i)(^|/)[^/]+\.example\.(ya?ml|json|env|txt|conf)$''',
+]
+regexTarget = "match"
+regexes = [
+  '''SECRET_KEY=(cambie|generar|REEMPLAZAR)''',
+]
+
+[[allowlists]]
+description = "Plantillas de ejemplo y marcadores de posicion (array)"
+paths = [
+  '''(?i)(^|/)\.env\.example$''',
+  '''(?i)(^|/)[^/]+\.example\.(ya?ml|json|env|txt|conf)$''',
+]
+regexTarget = "match"
+regexes = [
+  '''SECRET_KEY=(cambie|generar|REEMPLAZAR)''',
+]

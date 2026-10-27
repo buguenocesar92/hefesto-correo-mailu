@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.sh text eol=lf
+*.bash text eol=lf
+*.bats text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.example text eol=lf

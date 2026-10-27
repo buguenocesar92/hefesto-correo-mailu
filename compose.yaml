@@ -72,6 +72,18 @@ services:
   # No publiques nunca el admin ni la base de datos por separado.
   # ------------------------------------------------------------------
   front:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: ghcr.io/mailu/nginx:${MAILU_VERSION:-2024.06.64}
     hostname: mailu-front
     restart: unless-stopped
@@ -79,11 +91,14 @@ services:
       - .env
     depends_on:
       - resolver
-      - imap
-      - smtp
-      - antispam
       - admin
-      - webmail
+    # El grafo de dependencias es UNIDIRECCIONAL y sin ciclos:
+    # `front` (nginx) es el servicio de entrada y arranca DESPUES del
+    # resolutor y del panel de administracion; el resto (imap, smtp,
+    # antispam, webmail) arrancan DESPUES de `front`.
+    # Declarar en `front` a imap/smtp/antispam/webmail (que a su vez dependen
+    # de `front`) producia un ciclo de dependencias y hacia que el conjunto
+    # no se pudiera ni arrancar ni validar.
     # Resolutor DNSSEC propio. Mailu 1.9+ REQUIERE un resolutor que
     # valide DNSSEC; el contenedor admin se queda esperando en el
     # arranque si no encuentra uno (ver core/admin/start.py, test_DNS).
@@ -102,6 +117,18 @@ services:
   # contenedor admin no termina de arrancar (ver arriba).
   # ------------------------------------------------------------------
   resolver:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD", "unbound-control", "status"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: ghcr.io/mailu/unbound:${MAILU_VERSION:-2024.06.64}
     hostname: mailu-resolver
     restart: unless-stopped
@@ -116,6 +143,18 @@ services:
   # El navegador NUNCA se conecta a la base: todo va por la API interna.
   # ------------------------------------------------------------------
   admin:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8080/ || exit 1"]
+      interval: 60s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: ghcr.io/mailu/admin:${MAILU_VERSION:-2024.06.64}
     hostname: mailu-admin
     restart: unless-stopped
@@ -141,6 +180,18 @@ services:
   # no tiene copia, no existe otra.
   # ------------------------------------------------------------------
   imap:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD", "dovecot", "-c", "/etc/dovecot/dovecot.conf", "status"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: ghcr.io/mailu/dovecot:${MAILU_VERSION:-2024.06.64}
     hostname: mailu-imap
     restart: unless-stopped
@@ -161,6 +212,18 @@ services:
   # SMTP/Postfix. Cola de salida en /queue.
   # ------------------------------------------------------------------
   smtp:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD", "postfix", "status"]
+      interval: 60s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: ghcr.io/mailu/postfix:${MAILU_VERSION:-2024.06.64}
     hostname: mailu-smtp
     restart: unless-stopped
@@ -182,6 +245,18 @@ services:
   # eso su volumen es persistente aunque se pueda reconstruir.
   # ------------------------------------------------------------------
   antispam:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD", "rspamd", "configtest"]
+      interval: 60s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: ghcr.io/mailu/rspamd:${MAILU_VERSION:-2024.06.64}
     hostname: mailu-antispam
     restart: unless-stopped
@@ -206,6 +281,18 @@ services:
   # docs/02-INSTALACION-COOLIFY.md, seccion "Sin webmail".
   # ------------------------------------------------------------------
   webmail:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:80/ || exit 1"]
+      interval: 60s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: ghcr.io/mailu/webmail:${MAILU_VERSION:-2024.06.64}
     hostname: mailu-webmail
     restart: unless-stopped
@@ -214,7 +301,7 @@ services:
     depends_on:
       - front
     networks:
-      - webmail:
+      - webmail
     volumes:
       - webmail:/data
       - ./config/overrides/${WEBMAIL:-roundcube}:/overrides:ro
@@ -225,6 +312,18 @@ services:
   # docs/05-RESPALDOS-Y-RESTAURACION.md.
   # ------------------------------------------------------------------
   redis:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     image: redis:7.2.16-alpine@sha256:29e8589c3f9ba699b5f7aa4b3c7733c58852a3626439e619aa0ee78de08c6ca0
     hostname: mailu-redis
     restart: unless-stopped
@@ -247,6 +346,9 @@ networks:
   # El webmail va en una red aparte: no necesita ver la red interna de
   # correo, y asi queda aislado del resto.
   webmail:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
     driver: bridge
 
 volumes:
@@ -265,5 +367,11 @@ volumes:
   filter:
   # Datos de Roundcube (preferencias, contactos, borradores).
   webmail:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
   # Cache de Redis. Efimera, no se respalda.
   redis:
+    # Healthcheck: informa el estado del servicio en `docker compose ps`.
+    # No condiciona el arranque: front entra con service_started para
+    # que un comando de salud incorrecto no deje el servidor sin correo.
